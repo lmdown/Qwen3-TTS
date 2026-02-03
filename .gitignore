@@ -22,3 +22,6 @@ wheels/
 .vscode/
 venv/
 env/
+
+Qwen3*
+temp/

@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import gradio as gr
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from .. import Qwen3TTSModel, VoiceClonePromptItem
 
@@ -268,13 +269,7 @@ def build_demo(tts: Qwen3TTSModel, ckpt: str, gen_kwargs_default: Dict[str, Any]
     def _gen_common_kwargs() -> Dict[str, Any]:
         return dict(gen_kwargs_default)
 
-    theme = gr.themes.Soft(
-        font=[gr.themes.GoogleFont("Source Sans Pro"), "Arial", "sans-serif"],
-    )
-
-    css = ".gradio-container {max-width: none !important;}"
-
-    with gr.Blocks(theme=theme, css=css) as demo:
+    with gr.Blocks() as demo:
         gr.Markdown(
             f"""
 # Qwen3 TTS Demo
@@ -316,22 +311,85 @@ def build_demo(tts: Qwen3TTSModel, ckpt: str, gen_kwargs_default: Dict[str, Any]
 
             def run_instruct(text: str, lang_disp: str, spk_disp: str, instruct: str):
                 try:
+                    # 导入必要的库
+                    import threading
+                    import time
+                    
+                    # 开始计时
+                    start_time = time.time()
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting audio generation... (开始音频生成...)")
+                    gr.Info("Starting audio generation... (开始音频生成...)")
+                    
                     if not text or not text.strip():
                         return None, "Text is required (必须填写文本)."
                     if not spk_disp:
                         return None, "Speaker is required (必须选择说话人)."
+                    
                     language = lang_map.get(lang_disp, "Auto")
                     speaker = spk_map.get(spk_disp, spk_disp)
                     kwargs = _gen_common_kwargs()
-                    wavs, sr = tts.generate_custom_voice(
-                        text=text.strip(),
-                        language=language,
-                        speaker=speaker,
-                        instruct=(instruct or "").strip() or None,
-                        **kwargs,
-                    )
-                    return _wav_to_gradio_audio(wavs[0], sr), "Finished. (生成完成)"
+                    
+                    print("Generating audio... (正在生成音频...)")
+                    gr.Info("Generating audio... (正在生成音频...)")
+                    
+                    # 创建进度条
+                    pbar = tqdm(total=100, desc="Audio Generation Progress", ncols=80)
+                    pbar.update(10)  # Initial setup
+                    
+                    # 存储生成结果
+                    result = {"wavs": None, "sr": None, "error": None, "gen_start": None, "gen_end": None}
+                    
+                    # 定义音频生成函数
+                    def generate_audio():
+                        try:
+                            result["gen_start"] = time.time()
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting model generation... (开始模型生成...)")
+                            result["wavs"], result["sr"] = tts.generate_custom_voice(
+                                text=text.strip(),
+                                language=language,
+                                speaker=speaker,
+                                instruct=(instruct or "").strip() or None,
+                                **kwargs,
+                            )
+                            result["gen_end"] = time.time()
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model generation completed, time taken: {result['gen_end'] - result['gen_start']:.2f} seconds (模型生成完成，耗时: {result['gen_end'] - result['gen_start']:.2f}秒)")
+                        except Exception as e:
+                            result["error"] = e
+                    
+                    # 启动音频生成线程
+                    thread = threading.Thread(target=generate_audio)
+                    thread.start()
+                    
+                    # 更新进度条
+                    progress = 10
+                    while thread.is_alive() and progress < 90:
+                        time.sleep(0.1)
+                        progress += 1
+                        pbar.update(1)
+                    
+                    # 等待线程完成
+                    thread.join()
+                    
+                    # 完成进度条
+                    pbar.update(100 - progress)
+                    pbar.close()
+                    
+                    # 检查是否有错误
+                    if result["error"] is not None:
+                        raise result["error"]
+                    
+                    # 音频生成完成
+                    end_time = time.time()
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Audio generation completed, total time: {end_time - start_time:.2f} seconds (音频生成完成，总耗时: {end_time - start_time:.2f}秒)")
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model generation time: {result['gen_end'] - result['gen_start']:.2f} seconds (模型生成耗时: {result['gen_end'] - result['gen_start']:.2f}秒)")
+                    gr.Info("Audio generation completed successfully! (音频生成成功完成！)")
+                    
+                    return _wav_to_gradio_audio(result["wavs"][0], result["sr"]), "Finished. (生成完成)"
                 except Exception as e:
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error: {type(e).__name__}: {e} (错误: {type(e).__name__}: {e})")
+                    import traceback
+                    traceback.print_exc()
+                    gr.Warning(f"Error during audio generation: {type(e).__name__}: {e} (音频生成过程中出错: {type(e).__name__}: {e})")
                     return None, f"{type(e).__name__}: {e}"
 
             btn.click(run_instruct, inputs=[text_in, lang_in, spk_in, instruct_in], outputs=[audio_out, err])
@@ -363,20 +421,83 @@ def build_demo(tts: Qwen3TTSModel, ckpt: str, gen_kwargs_default: Dict[str, Any]
 
             def run_voice_design(text: str, lang_disp: str, design: str):
                 try:
+                    # 导入必要的库
+                    import threading
+                    import time
+                    
+                    # 开始计时
+                    start_time = time.time()
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting audio generation... (开始音频生成...)")
+                    gr.Info("Starting audio generation... (开始音频生成...)")
+                    
                     if not text or not text.strip():
                         return None, "Text is required (必须填写文本)."
                     if not design or not design.strip():
                         return None, "Voice design instruction is required (必须填写音色描述)."
+                    
                     language = lang_map.get(lang_disp, "Auto")
                     kwargs = _gen_common_kwargs()
-                    wavs, sr = tts.generate_voice_design(
-                        text=text.strip(),
-                        language=language,
-                        instruct=design.strip(),
-                        **kwargs,
-                    )
-                    return _wav_to_gradio_audio(wavs[0], sr), "Finished. (生成完成)"
+                    
+                    print("Generating audio... (正在生成音频...)")
+                    gr.Info("Generating audio... (正在生成音频...)")
+                    
+                    # 创建进度条
+                    pbar = tqdm(total=100, desc="Audio Generation Progress", ncols=80)
+                    pbar.update(10)  # Initial setup
+                    
+                    # 存储生成结果
+                    result = {"wavs": None, "sr": None, "error": None, "gen_start": None, "gen_end": None}
+                    
+                    # 定义音频生成函数
+                    def generate_audio():
+                        try:
+                            result["gen_start"] = time.time()
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting model generation... (开始模型生成...)")
+                            result["wavs"], result["sr"] = tts.generate_voice_design(
+                                text=text.strip(),
+                                language=language,
+                                instruct=design.strip(),
+                                **kwargs,
+                            )
+                            result["gen_end"] = time.time()
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model generation completed, time taken: {result['gen_end'] - result['gen_start']:.2f} seconds (模型生成完成，耗时: {result['gen_end'] - result['gen_start']:.2f}秒)")
+                        except Exception as e:
+                            result["error"] = e
+                    
+                    # 启动音频生成线程
+                    thread = threading.Thread(target=generate_audio)
+                    thread.start()
+                    
+                    # 更新进度条
+                    progress = 10
+                    while thread.is_alive() and progress < 90:
+                        time.sleep(0.1)
+                        progress += 1
+                        pbar.update(1)
+                    
+                    # 等待线程完成
+                    thread.join()
+                    
+                    # 完成进度条
+                    pbar.update(100 - progress)
+                    pbar.close()
+                    
+                    # 检查是否有错误
+                    if result["error"] is not None:
+                        raise result["error"]
+                    
+                    # 音频生成完成
+                    end_time = time.time()
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Audio generation completed, total time: {end_time - start_time:.2f} seconds (音频生成完成，总耗时: {end_time - start_time:.2f}秒)")
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model generation time: {result['gen_end'] - result['gen_start']:.2f} seconds (模型生成耗时: {result['gen_end'] - result['gen_start']:.2f}秒)")
+                    gr.Info("Audio generation completed successfully! (音频生成成功完成！)")
+                    
+                    return _wav_to_gradio_audio(result["wavs"][0], result["sr"]), "Finished. (生成完成)"
                 except Exception as e:
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error: {type(e).__name__}: {e} (错误: {type(e).__name__}: {e})")
+                    import traceback
+                    traceback.print_exc()
+                    gr.Warning(f"Error during audio generation: {type(e).__name__}: {e} (音频生成过程中出错: {type(e).__name__}: {e})")
                     return None, f"{type(e).__name__}: {e}"
 
             btn.click(run_voice_design, inputs=[text_in, lang_in, design_in], outputs=[audio_out, err])
@@ -399,6 +520,21 @@ def build_demo(tts: Qwen3TTSModel, ckpt: str, gen_kwargs_default: Dict[str, Any]
                                 value=False,
                             )
 
+                            # 自动更新Use x-vector only状态
+                            def update_xvec_only_state(ref_txt):
+                                # 如果参考文本为空，自动选中Use x-vector only
+                                if not ref_txt or not ref_txt.strip():
+                                    return True
+                                # 如果参考文本不为空，保持当前状态
+                                return xvec_only.value
+
+                            # 绑定参考文本变化事件
+                            ref_text.change(
+                                fn=update_xvec_only_state,
+                                inputs=[ref_text],
+                                outputs=[xvec_only]
+                            )
+
                         with gr.Column(scale=2):
                             text_in = gr.Textbox(
                                 label="Target Text (待合成文本)",
@@ -419,6 +555,15 @@ def build_demo(tts: Qwen3TTSModel, ckpt: str, gen_kwargs_default: Dict[str, Any]
 
                     def run_voice_clone(ref_aud, ref_txt: str, use_xvec: bool, text: str, lang_disp: str):
                         try:
+                            # 导入必要的库
+                            import threading
+                            import time
+                            
+                            # 开始计时
+                            start_time = time.time()
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting audio generation... (开始音频生成...)")
+                            gr.Info("Starting audio generation... (开始音频生成...)")
+                            
                             if not text or not text.strip():
                                 return None, "Target text is required (必须填写待合成文本)."
                             at = _audio_to_tuple(ref_aud)
@@ -429,22 +574,92 @@ def build_demo(tts: Qwen3TTSModel, ckpt: str, gen_kwargs_default: Dict[str, Any]
                                     "Reference text is required when use x-vector only is NOT enabled.\n"
                                     "(未勾选 use x-vector only 时，必须提供参考音频文本；否则请勾选 use x-vector only，但效果会变差.)"
                                 )
+                            
                             language = lang_map.get(lang_disp, "Auto")
                             kwargs = _gen_common_kwargs()
-                            wavs, sr = tts.generate_voice_clone(
-                                text=text.strip(),
-                                language=language,
-                                ref_audio=at,
-                                ref_text=(ref_txt.strip() if ref_txt else None),
-                                x_vector_only_mode=bool(use_xvec),
-                                **kwargs,
-                            )
-                            return _wav_to_gradio_audio(wavs[0], sr), "Finished. (生成完成)"
+                            
+                            print("Generating audio... (正在生成音频...)")
+                            gr.Info("Generating audio... (正在生成音频...)")
+                            
+                            # 创建进度条
+                            pbar = tqdm(total=100, desc="Audio Generation Progress", ncols=80)
+                            pbar.update(10)  # Initial setup
+                            
+                            # 存储生成结果
+                            result = {"wavs": None, "sr": None, "error": None, "gen_start": None, "gen_end": None}
+                            
+                            # 定义音频生成函数
+                            def generate_audio():
+                                try:
+                                    result["gen_start"] = time.time()
+                                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting model generation... (开始模型生成...)")
+                                    result["wavs"], result["sr"] = tts.generate_voice_clone(
+                                        text=text.strip(),
+                                        language=language,
+                                        ref_audio=at,
+                                        ref_text=(ref_txt.strip() if ref_txt else None),
+                                        x_vector_only_mode=bool(use_xvec),
+                                        **kwargs,
+                                    )
+                                    result["gen_end"] = time.time()
+                                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model generation completed, time taken: {result['gen_end'] - result['gen_start']:.2f} seconds (模型生成完成，耗时: {result['gen_end'] - result['gen_start']:.2f}秒)")
+                                except Exception as e:
+                                    result["error"] = e
+                            
+                            # 启动音频生成线程
+                            thread = threading.Thread(target=generate_audio)
+                            thread.start()
+                            
+                            # 更新进度条
+                            progress = 10
+                            while thread.is_alive() and progress < 90:
+                                time.sleep(0.1)
+                                progress += 1
+                                pbar.update(1)
+                            
+                            # 等待线程完成
+                            thread.join()
+                            
+                            # 完成进度条
+                            pbar.update(100 - progress)
+                            pbar.close()
+                            
+                            # 检查是否有错误
+                            if result["error"] is not None:
+                                raise result["error"]
+                            
+                            # 音频生成完成
+                            end_time = time.time()
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Audio generation completed, total time: {end_time - start_time:.2f} seconds (音频生成完成，总耗时: {end_time - start_time:.2f}秒)")
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model generation time: {result['gen_end'] - result['gen_start']:.2f} seconds (模型生成耗时: {result['gen_end'] - result['gen_start']:.2f}秒)")
+                            gr.Info("Audio generation completed successfully! (音频生成成功完成！)")
+                            
+                            return _wav_to_gradio_audio(result["wavs"][0], result["sr"]), "Finished. (生成完成)"
                         except Exception as e:
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error: {type(e).__name__}: {e} (错误: {type(e).__name__}: {e})")
+                            import traceback
+                            traceback.print_exc()
+                            gr.Warning(f"Error during audio generation: {type(e).__name__}: {e} (音频生成过程中出错: {type(e).__name__}: {e})")
                             return None, f"{type(e).__name__}: {e}"
 
+                    # 点击生成按钮时检查状态
+                    def check_xvec_state(ref_txt, use_xvec):
+                        if not ref_txt or not ref_txt.strip():
+                            if not use_xvec:
+                                gr.Info("Reference text is empty, automatically enabling 'Use x-vector only' mode. (参考文本为空，自动启用'Use x-vector only'模式.)")
+                                return True
+                        return use_xvec
+
+                    # 修改run_voice_clone函数，添加状态检查
+                    def enhanced_run_voice_clone(ref_aud, ref_txt, use_xvec, text, lang_disp):
+                        # 检查并更新状态
+                        updated_use_xvec = check_xvec_state(ref_txt, use_xvec)
+                        # 调用原始函数
+                        return run_voice_clone(ref_aud, ref_txt, updated_use_xvec, text, lang_disp)
+
+                    # 绑定按钮事件
                     btn.click(
-                        run_voice_clone,
+                        enhanced_run_voice_clone,
                         inputs=[ref_audio, ref_text, xvec_only, text_in, lang_in],
                         outputs=[audio_out, err],
                     )
@@ -469,8 +684,67 @@ Upload reference audio and text, choose use x-vector only or not, then save a re
                                 label="Use x-vector only (仅用说话人向量，效果有限，但不用传入参考音频文本)",
                                 value=False,
                             )
-                            save_btn = gr.Button("Save Voice File (保存音色文件)", variant="primary")
-                            prompt_file_out = gr.File(label="Voice File (音色文件)")
+
+                            # 自动更新Use x-vector only状态
+                            def update_xvec_only_state_s(ref_txt):
+                                # 如果参考文本为空，自动选中Use x-vector only
+                                if not ref_txt or not ref_txt.strip():
+                                    return True
+                                # 如果参考文本不为空，保持当前状态
+                                return xvec_only_s.value
+
+                            # 绑定参考文本变化事件
+                            ref_text_s.change(
+                                fn=update_xvec_only_state_s,
+                                inputs=[ref_text_s],
+                                outputs=[xvec_only_s]
+                            )
+
+                            # 点击保存按钮时检查状态
+                            def check_xvec_state_s(ref_txt, use_xvec):
+                                if not ref_txt or not ref_txt.strip():
+                                    if not use_xvec:
+                                        gr.Info("Reference text is empty, automatically enabling 'Use x-vector only' mode. (参考文本为空，自动启用'Use x-vector only'模式.)")
+                                        return True
+                                return use_xvec
+
+                            # 定义save_prompt函数
+                            def save_prompt(ref_aud, ref_txt: str, use_xvec: bool):
+                                try:
+                                    at = _audio_to_tuple(ref_aud)
+                                    if at is None:
+                                        return None, "Reference audio is required (必须上传参考音频)."
+                                    if (not use_xvec) and (not ref_txt or not ref_txt.strip()):
+                                        return None, (
+                                            "Reference text is required when use x-vector only is NOT enabled.\n"
+                                            "(未勾选 use x-vector only 时，必须提供参考音频文本；否则请勾选 use x-vector only，但效果会变差.)"
+                                        )
+                                    items = tts.create_voice_clone_prompt(
+                                        ref_audio=at,
+                                        ref_text=(ref_txt.strip() if ref_txt else None),
+                                        x_vector_only_mode=bool(use_xvec),
+                                    )
+                                    payload = {
+                                        "items": [asdict(it) for it in items],
+                                    }
+                                    fd, out_path = tempfile.mkstemp(prefix="voice_clone_prompt_", suffix=".pt")
+                                    os.close(fd)
+                                    torch.save(payload, out_path)
+                                    return out_path, "Finished. (生成完成)"
+                                except Exception as e:
+                                    return None, f"{type(e).__name__}: {e}"
+
+                            # 添加保存按钮
+                            save_btn = gr.Button("Save Voice (保存音色)", variant="primary")
+                            prompt_file_out = gr.File(label="Download Prompt File (下载提示文件)")
+                            err2 = gr.Textbox(label="Status (状态)", lines=2)
+
+                            # 重新绑定按钮事件
+                            save_btn.click(
+                                save_prompt,
+                                inputs=[ref_audio_s, ref_text_s, xvec_only_s],
+                                outputs=[prompt_file_out, err2]
+                            )
 
                         with gr.Column(scale=2):
                             gr.Markdown(
@@ -498,38 +772,22 @@ Upload a previously saved voice file, then synthesize new text.
                             audio_out2 = gr.Audio(label="Output Audio (合成结果)", type="numpy")
                             err2 = gr.Textbox(label="Status (状态)", lines=2)
 
-                    def save_prompt(ref_aud, ref_txt: str, use_xvec: bool):
-                        try:
-                            at = _audio_to_tuple(ref_aud)
-                            if at is None:
-                                return None, "Reference audio is required (必须上传参考音频)."
-                            if (not use_xvec) and (not ref_txt or not ref_txt.strip()):
-                                return None, (
-                                    "Reference text is required when use x-vector only is NOT enabled.\n"
-                                    "(未勾选 use x-vector only 时，必须提供参考音频文本；否则请勾选 use x-vector only，但效果会变差.)"
-                                )
-                            items = tts.create_voice_clone_prompt(
-                                ref_audio=at,
-                                ref_text=(ref_txt.strip() if ref_txt else None),
-                                x_vector_only_mode=bool(use_xvec),
-                            )
-                            payload = {
-                                "items": [asdict(it) for it in items],
-                            }
-                            fd, out_path = tempfile.mkstemp(prefix="voice_clone_prompt_", suffix=".pt")
-                            os.close(fd)
-                            torch.save(payload, out_path)
-                            return out_path, "Finished. (生成完成)"
-                        except Exception as e:
-                            return None, f"{type(e).__name__}: {e}"
-
                     def load_prompt_and_gen(file_obj, text: str, lang_disp: str):
                         try:
+                            # 导入必要的库
+                            import threading
+                            import time
+                            
+                            # 开始计时
+                            start_time = time.time()
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting audio generation... (开始音频生成...)")
+                            gr.Info("Starting audio generation... (开始音频生成...)")
+                            
                             if file_obj is None:
                                 return None, "Voice file is required (必须上传音色文件)."
                             if not text or not text.strip():
                                 return None, "Target text is required (必须填写待合成文本)."
-
+                            
                             path = getattr(file_obj, "name", None) or getattr(file_obj, "path", None) or str(file_obj)
                             payload = torch.load(path, map_location="cpu", weights_only=True)
                             if not isinstance(payload, dict) or "items" not in payload:
@@ -561,24 +819,82 @@ Upload a previously saved voice file, then synthesize new text.
                                         ref_text=d.get("ref_text", None),
                                     )
                                 )
-
+                            
+                            # 加载声音提示完成
+                            load_time = time.time()
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Voice prompt loaded, time taken: {load_time - start_time:.2f} seconds (加载声音提示完成，耗时: {load_time - start_time:.2f}秒)")
+                            gr.Info(f"Voice prompt loaded, time taken: {load_time - start_time:.2f} seconds (加载声音提示完成，耗时: {load_time - start_time:.2f}秒)")
+                            
                             language = lang_map.get(lang_disp, "Auto")
                             kwargs = _gen_common_kwargs()
-                            wavs, sr = tts.generate_voice_clone(
-                                text=text.strip(),
-                                language=language,
-                                voice_clone_prompt=items,
-                                **kwargs,
-                            )
-                            return _wav_to_gradio_audio(wavs[0], sr), "Finished. (生成完成)"
+
+                            print("Generating audio... (正在生成音频...)")
+                            gr.Info("Generating audio... (正在生成音频...)")
+                            
+                            # 创建进度条
+                            pbar = tqdm(total=100, desc="Audio Generation Progress", ncols=80)
+                            pbar.update(10)  # Initial setup
+                            
+                            # 存储生成结果
+                            result = {"wavs": None, "sr": None, "error": None, "gen_start": None, "gen_end": None}
+                            
+                            # 定义音频生成函数
+                            def generate_audio():
+                                try:
+                                    result["gen_start"] = time.time()
+                                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting model generation... (开始模型生成...)")
+                                    result["wavs"], result["sr"] = tts.generate_voice_clone(
+                                        text=text.strip(),
+                                        language=language,
+                                        voice_clone_prompt=items,
+                                        **kwargs,
+                                    )
+                                    result["gen_end"] = time.time()
+                                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model generation completed, time taken: {result['gen_end'] - result['gen_start']:.2f} seconds (模型生成完成，耗时: {result['gen_end'] - result['gen_start']:.2f}秒)")
+                                except Exception as e:
+                                    result["error"] = e
+                            
+                            # 启动音频生成线程
+                            thread = threading.Thread(target=generate_audio)
+                            thread.start()
+                            
+                            # 更新进度条
+                            progress = 10
+                            while thread.is_alive() and progress < 90:
+                                time.sleep(0.1)
+                                progress += 1
+                                pbar.update(1)
+                            
+                            # 等待线程完成
+                            thread.join()
+                            
+                            # 完成进度条
+                            pbar.update(100 - progress)
+                            pbar.close()
+                            
+                            # 检查是否有错误
+                            if result["error"] is not None:
+                                raise result["error"]
+                            
+                            # 音频生成完成
+                            end_time = time.time()
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Audio generation completed, total time: {end_time - start_time:.2f} seconds (音频生成完成，总耗时: {end_time - start_time:.2f}秒)")
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Voice prompt loading time: {load_time - start_time:.2f} seconds (加载声音提示耗时: {load_time - start_time:.2f}秒)")
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model generation time: {result['gen_end'] - result['gen_start']:.2f} seconds (模型生成耗时: {result['gen_end'] - result['gen_start']:.2f}秒)")
+                            gr.Info("Audio generation completed successfully! (音频生成成功完成！)")
+                            
+                            return _wav_to_gradio_audio(result["wavs"][0], result["sr"]), "Finished. (生成完成)"
                         except Exception as e:
+                            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error: {type(e).__name__}: {e} (错误: {type(e).__name__}: {e})")
+                            import traceback
+                            traceback.print_exc()
+                            gr.Warning(f"Error during audio generation: {type(e).__name__}: {e} (音频生成过程中出错: {type(e).__name__}: {e})")
                             return None, (
                                 f"Failed to read or use voice file. Check file format/content.\n"
                                 f"(读取或使用音色文件失败，请检查文件格式或内容)\n"
                                 f"{type(e).__name__}: {e}"
                             )
 
-                    save_btn.click(save_prompt, inputs=[ref_audio_s, ref_text_s, xvec_only_s], outputs=[prompt_file_out, err2])
                     gen_btn2.click(load_prompt_and_gen, inputs=[prompt_file_in, text_in2, lang_in2], outputs=[audio_out2, err2])
 
         gr.Markdown(
@@ -615,11 +931,19 @@ def main(argv=None) -> int:
     gen_kwargs_default = _collect_gen_kwargs(args)
     demo = build_demo(tts, ckpt, gen_kwargs_default)
 
+    # 创建theme和css
+    theme = gr.themes.Default(
+        font=[gr.themes.GoogleFont("Source Sans Pro"), "Arial", "sans-serif"],
+    )
+    css = ".gradio-container {max-width: none !important;}"
+
     launch_kwargs: Dict[str, Any] = dict(
         server_name=args.ip,
         server_port=args.port,
         share=args.share,
         ssl_verify=True if args.ssl_verify else False,
+        theme=theme,
+        css=css,
     )
     if args.ssl_certfile is not None:
         launch_kwargs["ssl_certfile"] = args.ssl_certfile
